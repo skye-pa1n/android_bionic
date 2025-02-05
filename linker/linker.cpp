@@ -1160,8 +1160,19 @@ static int open_library(android_namespace_t* ns,
 const char* fix_dt_needed(const char* dt_needed, const char* sopath __unused) {
 #if !defined(__LP64__)
   // Work around incorrect DT_NEEDED entries for old apps: http://b/21364029
+  int app_target_api_level = get_application_target_sdk_version();
+  if (app_target_api_level < __ANDROID_API_M__) {
     const char* bname = basename(dt_needed);
+    if (bname != dt_needed) {
+      DL_WARN_documented_change(__ANDROID_API_M__,
+                                "invalid-dt_needed-entries-enforced-for-api-level-23",
+                                "library \"%s\" has invalid DT_NEEDED entry \"%s\"",
+                                sopath, dt_needed, app_target_api_level);
+      add_dlwarning(sopath, "invalid DT_NEEDED entry",  dt_needed);
+    }
+
     return bname;
+  }
 #endif
   return dt_needed;
 }
@@ -2831,14 +2842,14 @@ bool soinfo::relocate(const VersionTracker& version_tracker, ElfRelIteratorT&& r
                                 ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC;
         if (protect_segments) {
           if (phdr_table_protect_segments(phdr, phnum, load_bias) < 0) {
-            DL_WARN("can't protect segments for \"%s\": %s",
+            DL_ERR("can't protect segments for \"%s\": %s",
                    get_realpath(), strerror(errno));
             return false;
           }
         }
 #endif
         if (ELF_ST_TYPE(s->st_info) == STT_TLS) {
-          DL_WARN("unsupported ELF TLS symbol \"%s\" referenced by \"%s\"",
+          DL_ERR("unsupported ELF TLS symbol \"%s\" referenced by \"%s\"",
                  sym_name, get_realpath());
           return false;
         }
@@ -2846,8 +2857,9 @@ bool soinfo::relocate(const VersionTracker& version_tracker, ElfRelIteratorT&& r
 #if !defined(__LP64__)
         if (protect_segments) {
           if (phdr_table_unprotect_segments(phdr, phnum, load_bias) < 0) {
-            DL_WARN("can't unprotect loadable segments for \"%s\": %s",
+            DL_ERR("can't unprotect loadable segments for \"%s\": %s",
                    get_realpath(), strerror(errno));
+            return false;
           }
         }
 #endif
@@ -3391,8 +3403,13 @@ bool soinfo::prelink_image() {
         break;
 
       case DT_TEXTREL:
+#if defined(__LP64__)
+        DL_ERR("\"%s\" has text relocations", get_realpath());
+        return false;
+#else
         has_text_relocations = true;
         break;
+#endif
 
       case DT_SYMBOLIC:
         has_DT_SYMBOLIC = true;
@@ -3404,7 +3421,12 @@ bool soinfo::prelink_image() {
 
       case DT_FLAGS:
         if (d->d_un.d_val & DF_TEXTREL) {
+#if defined(__LP64__)
+          DL_ERR("\"%s\" has text relocations", get_realpath());
+          return false;
+#else
           has_text_relocations = true;
+#endif
         }
         if (d->d_un.d_val & DF_SYMBOLIC) {
           has_DT_SYMBOLIC = true;
@@ -3594,6 +3616,30 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& 
   if (!version_tracker.init(this)) {
     return false;
   }
+
+#if !defined(__LP64__)
+  if (has_text_relocations) {
+    // Fail if app is targeting M or above.
+    int app_target_api_level = get_application_target_sdk_version();
+    if (app_target_api_level != __ANDROID_API__
+        && app_target_api_level >= __ANDROID_API_M__) {
+      DL_WARN("\"%s\" has text relocations (https://android.googlesource.com/platform/"
+                     "bionic/+/master/android-changes-for-ndk-developers.md#Text-Relocations-"
+                     "Enforced-for-API-level-23)", get_realpath());
+    }
+    // Make segments writable to allow text relocations to work properly. We will later call
+    // phdr_table_protect_segments() after all of them are applied.
+    DL_WARN_documented_change(__ANDROID_API_M__,
+                              "Text-Relocations-Enforced-for-API-level-23",
+                              "\"%s\" has text relocations",
+                              get_realpath());
+    add_dlwarning(get_realpath(), "text relocations");
+    if (phdr_table_unprotect_segments(phdr, phnum, load_bias) < 0) {
+      DL_ERR("can't unprotect loadable segments for \"%s\": %s", get_realpath(), strerror(errno));
+      return false;
+    }
+  }
+#endif
 
   if (android_relocs_ != nullptr) {
     // check signature
@@ -3876,18 +3922,7 @@ std::vector<android_namespace_t*> init_default_namespaces(const char* executable
     // somain and ld_preloads are added to these namespaces after LD_PRELOAD libs are linked
   }
 
-  uint32_t target_sdk = config->target_sdk_version();
-#ifdef SDK_VERSION_OVERRIDES
-  for (const auto& entry : android::base::Split(SDK_VERSION_OVERRIDES, " ")) {
-    auto splitted = android::base::Split(entry, "=");
-    if (splitted.size() == 2 && splitted[0] == executable_path) {
-      target_sdk = static_cast<uint32_t>(std::stoul(splitted[1]));
-      break;
-    }
-  }
-  DEBUG("Target SDK for %s = %d", executable_path, target_sdk);
-#endif
-  set_application_target_sdk_version(target_sdk);
+  set_application_target_sdk_version(config->target_sdk_version());
 
   std::vector<android_namespace_t*> created_namespaces;
   created_namespaces.reserve(namespaces.size());
