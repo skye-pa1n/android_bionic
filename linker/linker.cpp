@@ -1160,19 +1160,8 @@ static int open_library(android_namespace_t* ns,
 const char* fix_dt_needed(const char* dt_needed, const char* sopath __unused) {
 #if !defined(__LP64__)
   // Work around incorrect DT_NEEDED entries for old apps: http://b/21364029
-  int app_target_api_level = get_application_target_sdk_version();
-  if (app_target_api_level < __ANDROID_API_M__) {
     const char* bname = basename(dt_needed);
-    if (bname != dt_needed) {
-      DL_WARN_documented_change(__ANDROID_API_M__,
-                                "invalid-dt_needed-entries-enforced-for-api-level-23",
-                                "library \"%s\" has invalid DT_NEEDED entry \"%s\"",
-                                sopath, dt_needed, app_target_api_level);
-      add_dlwarning(sopath, "invalid DT_NEEDED entry",  dt_needed);
-    }
-
     return bname;
-  }
 #endif
   return dt_needed;
 }
@@ -2842,14 +2831,14 @@ bool soinfo::relocate(const VersionTracker& version_tracker, ElfRelIteratorT&& r
                                 ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC;
         if (protect_segments) {
           if (phdr_table_protect_segments(phdr, phnum, load_bias) < 0) {
-            DL_ERR("can't protect segments for \"%s\": %s",
+            DL_WARN("can't protect segments for \"%s\": %s",
                    get_realpath(), strerror(errno));
             return false;
           }
         }
 #endif
         if (ELF_ST_TYPE(s->st_info) == STT_TLS) {
-          DL_ERR("unsupported ELF TLS symbol \"%s\" referenced by \"%s\"",
+          DL_WARN("unsupported ELF TLS symbol \"%s\" referenced by \"%s\"",
                  sym_name, get_realpath());
           return false;
         }
@@ -2857,9 +2846,8 @@ bool soinfo::relocate(const VersionTracker& version_tracker, ElfRelIteratorT&& r
 #if !defined(__LP64__)
         if (protect_segments) {
           if (phdr_table_unprotect_segments(phdr, phnum, load_bias) < 0) {
-            DL_ERR("can't unprotect loadable segments for \"%s\": %s",
+            DL_WARN("can't unprotect loadable segments for \"%s\": %s",
                    get_realpath(), strerror(errno));
-            return false;
           }
         }
 #endif
@@ -3606,23 +3594,6 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& 
   if (!version_tracker.init(this)) {
     return false;
   }
-
-#if !defined(__LP64__)
-  if (has_text_relocations) {
-    // Fail if app is targeting M or above.
-    int app_target_api_level = get_application_target_sdk_version();
-    // Make segments writable to allow text relocations to work properly. We will later call
-    // phdr_table_protect_segments() after all of them are applied.
-    DL_WARN_documented_change(__ANDROID_API_M__,
-                              "Text-Relocations-Enforced-for-API-level-23",
-                              "\"%s\" has text relocations",
-                              get_realpath());
-    add_dlwarning(get_realpath(), "text relocations");
-    if (phdr_table_unprotect_segments(phdr, phnum, load_bias) < 0) {
-      DL_WARN("can't unprotect loadable segments for \"%s\": %s", get_realpath(), strerror(errno));
-    }
-  }
-#endif
 
   if (android_relocs_ != nullptr) {
     // check signature
