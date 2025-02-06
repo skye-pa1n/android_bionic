@@ -29,7 +29,7 @@
 #ifndef _FCNTL_H
 #error "Never include this file directly; instead, include <fcntl.h>"
 #endif
-
+#define O_TMPFILE (020000000 | O_DIRECTORY)
 int __open_2(const char*, int) __INTRODUCED_IN(17);
 int __openat_2(int, const char*, int) __INTRODUCED_IN(17);
 /*
