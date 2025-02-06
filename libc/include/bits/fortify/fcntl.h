@@ -29,7 +29,7 @@
 #ifndef _FCNTL_H
 #error "Never include this file directly; instead, include <fcntl.h>"
 #endif
-#define O_TMPFILE (020000000 | O_DIRECTORY)
+
 int __open_2(const char*, int) __INTRODUCED_IN(17);
 int __openat_2(int, const char*, int) __INTRODUCED_IN(17);
 /*
@@ -43,6 +43,7 @@ int __openat_real(int, const char*, int, ...) __RENAME(openat);
 #define __open_too_few_args_error "called with O_CREAT or O_TMPFILE, but missing mode"
 #define __open_useless_modes_warning "has superfluous mode bits; missing O_CREAT?"
 /* O_TMPFILE shares bits with O_DIRECTORY. */
+#define O_TMPFILE (020000000 | O_DIRECTORY)
 #define __open_modes_useful(flags) (((flags) & O_CREAT) || ((flags) & O_TMPFILE) == O_TMPFILE)
 #if defined(__clang__)
 
